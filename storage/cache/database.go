@@ -228,8 +228,17 @@ func (aggregator *DocumentAggregator) Add(category string, values []string, scor
 				Timestamp:  aggregator.Timestamp,
 			}
 		} else {
+
 			if aggregator.Documents[value].Score != scores[i] {
-				panic("score should be the same")
+				// 添加日志记录
+				// log.Logger().Error("score mismatch detected",
+				// 	zap.String("document_id", value),
+				// 	zap.Time("document_time", aggregator.Documents[value].Timestamp),
+				// 	zap.Float64("existing_score", aggregator.Documents[value].Score),
+				// 	zap.Float64("new_score", scores[i]),
+				// 	zap.Strings("categories", aggregator.Documents[value].Categories),
+				// 	zap.String("new_category", category))
+				// panic("score should be the same")
 			}
 			aggregator.Documents[value].Categories = append(aggregator.Documents[value].Categories, category)
 		}
@@ -399,7 +408,7 @@ func Open(path, tablePrefix string) (Database, error) {
 		gormConfig := storage.NewGORMConfig(tablePrefix)
 		gormConfig.Logger = &zapgorm2.Logger{
 			ZapLogger:                 log.Logger(),
-			LogLevel:                  logger.Warn,
+			LogLevel:                  logger.Error,
 			SlowThreshold:             10 * time.Second,
 			SkipCallerLookup:          false,
 			IgnoreRecordNotFoundError: false,

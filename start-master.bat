@@ -1,0 +1,1 @@
+go run cmd/gorse-master/main.go --config config/config.toml

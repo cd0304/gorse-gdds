@@ -336,7 +336,7 @@ func Open(path, tablePrefix string) (Database, error) {
 		gormConfig := storage.NewGORMConfig(tablePrefix)
 		gormConfig.Logger = &zapgorm2.Logger{
 			ZapLogger:                 log.Logger(),
-			LogLevel:                  logger.Warn,
+			LogLevel:                  logger.Error,
 			SlowThreshold:             10 * time.Second,
 			SkipCallerLookup:          false,
 			IgnoreRecordNotFoundError: false,

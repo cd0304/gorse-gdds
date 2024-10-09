@@ -497,7 +497,13 @@ func (w *Worker) Recommend(users []data.User) {
 						zap.Int("n_working_users", len(users)),
 						zap.Int("throughput", throughput))
 				}
-				if _, err := w.masterClient.PushProgress(context.Background(), protocol.EncodeProgress(w.tracer.List())); err != nil {
+				// 使用 worker 的名称作为 tracer
+				progress := w.tracer.List()
+				for i := range progress {
+					progress[i].Tracer = w.workerName
+				}
+
+				if _, err := w.masterClient.PushProgress(context.Background(), protocol.EncodeProgress(progress)); err != nil {
 					log.Logger().Error("failed to report update task", zap.Error(err))
 				}
 			}
@@ -560,6 +566,7 @@ func (w *Worker) Recommend(users []data.User) {
 		updateUserCount.Add(1)
 
 		// load historical items
+
 		historyItems, feedbacks, err := w.loadUserHistoricalItems(w.DataClient, userId)
 		excludeSet := mapset.NewSet(historyItems...)
 		if err != nil {
@@ -589,7 +596,9 @@ func (w *Worker) Recommend(users []data.User) {
 
 		// Recommender #1: collaborative filtering.
 		collaborativeUsed := false
+		// log.Logger().Info("collaborative filtering", zap.Bool("enable", w.Config.Recommend.Offline.EnableColRecommend))
 		if w.Config.Recommend.Offline.EnableColRecommend && w.RankingModel != nil && !w.RankingModel.Invalid() {
+			// log.Logger().Info("进来 collaborative filtering")
 			if userIndex := w.RankingModel.GetUserIndex().ToNumber(userId); w.RankingModel.IsUserPredictable(userIndex) {
 				var recommend map[string][]string
 				var usedTime time.Duration
@@ -784,36 +793,37 @@ func (w *Worker) Recommend(users []data.User) {
 				return errors.Trace(err)
 			}
 		}
-
-		// explore latest and popular
-		recommendTime := time.Now()
-		aggregator := cache.NewDocumentAggregator(recommendTime)
-		for category, result := range results {
-			scores, err := w.exploreRecommend(result, excludeSet, category)
-			if err != nil {
-				log.Logger().Error("failed to explore latest and popular items", zap.Error(err))
+		if w.Config.Recommend.Offline.EnableLatestRecommend || w.Config.Recommend.Offline.EnablePopularRecommend {
+			// explore latest and popular
+			recommendTime := time.Now()
+			aggregator := cache.NewDocumentAggregator(recommendTime)
+			for category, result := range results {
+				scores, err := w.exploreRecommend(result, excludeSet, category)
+				if err != nil {
+					log.Logger().Error("failed to explore latest and popular items", zap.Error(err))
+					return errors.Trace(err)
+				}
+				aggregator.Add(category, lo.Map(scores, func(document cache.Document, _ int) string {
+					return document.Id
+				}), lo.Map(scores, func(document cache.Document, _ int) float64 {
+					return document.Score
+				}))
+			}
+			if err = w.CacheClient.AddDocuments(ctx, cache.OfflineRecommend, userId, aggregator.ToSlice()); err != nil {
+				log.Logger().Error("failed to cache recommendation", zap.Error(err))
 				return errors.Trace(err)
 			}
-			aggregator.Add(category, lo.Map(scores, func(document cache.Document, _ int) string {
-				return document.Id
-			}), lo.Map(scores, func(document cache.Document, _ int) float64 {
-				return document.Score
-			}))
-		}
-		if err = w.CacheClient.AddDocuments(ctx, cache.OfflineRecommend, userId, aggregator.ToSlice()); err != nil {
-			log.Logger().Error("failed to cache recommendation", zap.Error(err))
-			return errors.Trace(err)
-		}
-		if err = w.CacheClient.Set(
-			ctx,
-			cache.Time(cache.Key(cache.LastUpdateUserRecommendTime, userId), recommendTime),
-			cache.String(cache.Key(cache.OfflineRecommendDigest, userId), w.Config.OfflineRecommendDigest(
-				config.WithCollaborative(collaborativeUsed),
-				config.WithRanking(ctrUsed),
-				config.WithItemNeighborDigest(strings.Join(itemNeighborDigests.ToSlice(), "-")),
-				config.WithUserNeighborDigest(strings.Join(userNeighborDigests.ToSlice(), "-")),
-			))); err != nil {
-			log.Logger().Error("failed to cache recommendation time", zap.Error(err))
+			if err = w.CacheClient.Set(
+				ctx,
+				cache.Time(cache.Key(cache.LastUpdateUserRecommendTime, userId), recommendTime),
+				cache.String(cache.Key(cache.OfflineRecommendDigest, userId), w.Config.OfflineRecommendDigest(
+					config.WithCollaborative(collaborativeUsed),
+					config.WithRanking(ctrUsed),
+					config.WithItemNeighborDigest(strings.Join(itemNeighborDigests.ToSlice(), "-")),
+					config.WithUserNeighborDigest(strings.Join(userNeighborDigests.ToSlice(), "-")),
+				))); err != nil {
+				log.Logger().Error("failed to cache recommendation time", zap.Error(err))
+			}
 		}
 		return nil
 	})

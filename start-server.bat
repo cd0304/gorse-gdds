@@ -1,0 +1,1 @@
+go run cmd/gorse-server/main.go

@@ -637,7 +637,13 @@ func (m *Master) getStats(request *restful.Request, response *restful.Response) 
 	server.Ok(response, status)
 }
 
-func (m *Master) getTasks(_ *restful.Request, response *restful.Response) {
+func (m *Master) getTasks(request *restful.Request, response *restful.Response) {
+	// 打印请求信息
+	// log.Logger().Info("getTasks request received",
+	// 	zap.String("method", request.Request.Method),
+	// 	zap.String("url", request.Request.URL.String()),
+	// 	zap.Any("headers", request.Request.Header))
+
 	// List workers
 	workers := mapset.NewSet[string]()
 	m.nodesInfoMutex.RLock()
@@ -647,15 +653,57 @@ func (m *Master) getTasks(_ *restful.Request, response *restful.Response) {
 		}
 	}
 	m.nodesInfoMutex.RUnlock()
+
+	// 打印worker信息
+	// log.Logger().Info("Workers found", zap.Any("workers", workers.ToSlice()))
+
 	// List local progress
 	progressList := m.tracer.List()
+
+	// 打印本地进度信息
+	// log.Logger().Info("Local progress", zap.Int("count", len(progressList)))
+
+	// 打印 m.remoteProgress 的内容
+	// log.Logger().Info("Dumping m.remoteProgress content")
+	// m.remoteProgress.Range(func(key, value interface{}) bool {
+	// 	workerName := key.(string)
+	// 	workerProgress := value.([]progress.Progress)
+	// 	log.Logger().Info("Remote progress entry",
+	// 		zap.String("worker", workerName),
+	// 		zap.Int("progress_count", len(workerProgress)),
+	// 		zap.Any("progress", workerProgress))
+	// 	return true
+	// })
+
 	// list remote progress
+	remoteProgressCount := 0
 	m.remoteProgress.Range(func(key, value interface{}) bool {
-		if workers.Contains(key.(string)) {
-			progressList = append(progressList, value.([]progress.Progress)...)
+		workerName := key.(string)
+		if workers.Contains(workerName) {
+			workerProgress := value.([]progress.Progress)
+			progressList = append(progressList, workerProgress...)
+			remoteProgressCount += len(workerProgress)
+
+			// 打印每个worker的进度信息
+			// log.Logger().Info("Remote progress for worker",
+			// 	zap.String("worker", workerName),
+			// 	zap.Int("progress_count", len(workerProgress)),
+			// 	zap.Any("progress", workerProgress))
+		} else {
+			// 打印被排除的 worker 信息
+			// log.Logger().Warn("Worker progress excluded",
+			// 	zap.String("worker", workerName),
+			// 	zap.Any("known_workers", workers.ToSlice()))
 		}
 		return true
 	})
+
+	// 打印总的进度信息
+	// log.Logger().Info("Total progress",
+	// 	zap.Int("local_count", len(progressList)-remoteProgressCount),
+	// 	zap.Int("remote_count", remoteProgressCount),
+	// 	zap.Int("total_count", len(progressList)))
+
 	server.Ok(response, progressList)
 }
 

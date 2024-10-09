@@ -1,0 +1,1 @@
+go run cmd/gorse-worker/main.go
